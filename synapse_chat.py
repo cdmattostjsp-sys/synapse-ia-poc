@@ -131,26 +131,26 @@ if user_input:
     with st.chat_message("assistant"):
         st.markdown(ack)
 
-    # 4) chama agente
+    # 4) chama agente especializado
     agent_answer = call_agent(stage, user_input, st.session_state.messages)
 
     # 5) exibe, grava e salva artefato
-st.session_state.messages.append({"role": "assistant", "content": agent_answer})
-st.session_state.artefatos[stage] = agent_answer
-with st.chat_message("assistant"):
-    st.markdown(agent_answer)
-
-# 6) Sugere próximo artefato com base no atual
-proximo = sugestao_proximo_artefato(stage)
-if proximo and proximo not in st.session_state.artefatos:
-    sugestao_texto = f"🔄 Deseja que eu gere o artefato **{proximo}** com base neste conteúdo de **{stage}**?"
-    st.session_state.messages.append({"role": "assistant", "content": sugestao_texto})
+    st.session_state.messages.append({"role": "assistant", "content": agent_answer})
+    st.session_state.artefatos[stage] = agent_answer
     with st.chat_message("assistant"):
-        st.markdown(sugestao_texto)
+        st.markdown(agent_answer)
 
-        if st.button(f"Gerar {proximo} automaticamente"):
-            prompt_base = f"Use o conteúdo do artefato {stage} abaixo como base para gerar o {proximo}:\n\n{agent_answer}"
-            nova_resposta = call_agent(proximo, prompt_base, st.session_state.messages)
-            st.session_state.messages.append({"role": "assistant", "content": nova_resposta})
-            st.session_state.artefatos[proximo] = nova_resposta
-            st.markdown(nova_resposta)
+    # 6) Sugere próximo artefato com base no atual
+    proximo = sugestao_proximo_artefato(stage)
+    if proximo and proximo not in st.session_state.artefatos:
+        sugestao_texto = f"🔄 Deseja que eu gere o artefato **{proximo}** com base neste conteúdo de **{stage}**?"
+        st.session_state.messages.append({"role": "assistant", "content": sugestao_texto})
+        with st.chat_message("assistant"):
+            st.markdown(sugestao_texto)
+
+            if st.button(f"Gerar {proximo} automaticamente"):
+                prompt_base = f"Use o conteúdo do artefato {stage} abaixo como base para gerar o {proximo}:\n\n{agent_answer}"
+                nova_resposta = call_agent(proximo, prompt_base, st.session_state.messages)
+                st.session_state.messages.append({"role": "assistant", "content": nova_resposta})
+                st.session_state.artefatos[proximo] = nova_resposta
+                st.markdown(nova_resposta)
