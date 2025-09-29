@@ -28,7 +28,7 @@ st.caption("Chat único com **Agente Orquestrador** e **Agentes Especializados**
 # SEGREDO (CHAVE) — VIA STREAMLIT SECRETS
 # -------------------------------------------------
 if "openai_api_key" not in st.secrets:
-    st.warning("Adicione a chave da OpenAI em **Settings → Secrets** do Streamlit Cloud:\n\n```\nopenai_api_key = \"sk-...\"\n```")
+    st.warning(\"Adicione a chave da OpenAI em **Settings → Secrets** do Streamlit Cloud:\n\n```\nopenai_api_key = \\\"sk-...\\\"\n```")
     client = None
 else:
     client = OpenAI(api_key=st.secrets["openai_api_key"])
@@ -40,6 +40,7 @@ if not _client_ok:
 # -------------------------------------------------
 # PROMPTS DOS AGENTES (enxutos e objetivos)
 # -------------------------------------------------
+
 AGENTS: Dict[str, str] = {
     "DFD": (
         "Você é o Agente DFD (Documento de Formalização da Demanda) do TJSP. "
@@ -120,6 +121,8 @@ def route_stage(text: str) -> str:
     for pattern, stage in SYNONYMS.items():
         if re.search(pattern, low):
             return stage
+
+    # Fallback com LLM
     if client:
         msg = [
             {"role": "system", "content":
@@ -141,8 +144,12 @@ def route_stage(text: str) -> str:
 def call_agent(stage: str, user_text: str, history: List[Dict]) -> str:
     """Chama o agente especializado (LLM) com um prompt de sistema + contexto curto."""
     system = AGENTS.get(stage, AGENTS["TR"])
+
+    # Pega as últimas 4 trocas do histórico (user + assistant)
     ctx = [f"{m['role']}: {m['content']}" for m in history[-4:]]
     context_block = "\n".join(ctx) if ctx else "Sem histórico relevante."
+
+    # Prompt que será enviado ao agente
     user_prompt = (
         f"Etapa: {stage}\n"
         f"Contexto recente:\n{context_block}\n\n"
@@ -150,6 +157,7 @@ def call_agent(stage: str, user_text: str, history: List[Dict]) -> str:
         f"Se faltarem dados essenciais, pergunte de forma clara o que falta antes de concluir o artefato.\n\n"
         f"Entrada do usuário:\n{user_text}"
     )
+
     try:
         resp = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -160,9 +168,10 @@ def call_agent(stage: str, user_text: str, history: List[Dict]) -> str:
             temperature=0.3,
             max_tokens=900
         )
-        return resp.choices[0].message.content
+        return resp.choices[0].message.content.strip()
     except Exception as e:
         return f"⚠️ Não consegui consultar o modelo agora. Detalhe: {e}"
+
 
 def orchestrator_acknowledgement(stage: str, user_text: str) -> str:
     """Resposta mais natural/inteligente do agente orquestrador."""
@@ -170,38 +179,25 @@ def orchestrator_acknowledgement(stage: str, user_text: str) -> str:
         resp = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content":
-                 "Você é o Agente Orquestrador do Synapse.IA. Sua tarefa é reconhecer a intenção do usuário, dizer que entendeu de forma amigável e indicar qual agente especializado irá responder. Seja acolhedor e natural, evite repetir o texto do usuário."},
-                {"role": "user", "content": f"Etapa: {stage}\nMensagem do usuário: {user_text}"}
+                {
+                    "role": "system",
+                    "content": (
+                        "Você é o Agente Orquestrador do Synapse.IA. "
+                        "Sua tarefa é reconhecer a intenção do usuário, dizer que entendeu de forma amigável "
+                        "e indicar qual agente especializado irá responder. Seja acolhedor e natural, evite repetir o texto do usuário."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Etapa: {stage}\nMensagem do usuário: {user_text}"
+                }
             ],
             temperature=0.6,
             max_tokens=120
         )
         return resp.choices[0].message.content.strip()
-    except Exception as e:
+    except Exception:
         return f"Entendido! Acionando o agente {stage} para te ajudar."
-
-def sugestao_proximo_artefato(stage_atual: str) -> str:
-    """Define o próximo artefato sugerido com base no anterior."""
-    mapa = {
-        "DFD": "ETP",
-        "ETP": "TR",
-        "TR": "CONTRATO",
-        "CONTRATO": "FISCALIZACAO"
-    }
-    return mapa.get(stage_atual)
-
-# -------------------------------------------------
-# FUNÇÕES DE ORQUESTRAÇÃO
-# -------------------------------------------------
-def route_stage(text: str) -> str:
-    ...
-
-def call_agent(stage: str, user_text: str, history: List[Dict]) -> str:
-    ...
-
-def orchestrator_acknowledgement(stage: str, user_text: str) -> str:
-    ...
 
 def sugestao_proximo_artefato(stage_atual: str) -> str:
     """Define o próximo artefato sugerido com base no anterior."""
