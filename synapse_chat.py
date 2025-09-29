@@ -117,11 +117,9 @@ AGENT_ORDER = list(AGENTS.keys())  # para validação
 def route_stage(text: str) -> str:
     """Roteia pela regra; se não achar, pede ajuda para o LLM (fallback)."""
     low = text.lower()
-    # 1) Regras simples
     for pattern, stage in SYNONYMS.items():
         if re.search(pattern, low):
             return stage
-    # 2) Fallback LLM (responder somente com um rótulo)
     if client:
         msg = [
             {"role": "system", "content":
@@ -143,7 +141,6 @@ def route_stage(text: str) -> str:
 def call_agent(stage: str, user_text: str, history: List[Dict]) -> str:
     """Chama o agente especializado (LLM) com um prompt de sistema + contexto curto."""
     system = AGENTS.get(stage, AGENTS["TR"])
-    # contexto curto (últimas 4 trocas)
     ctx = []
     for m in history[-4:]:
         ctx.append(f"{m['role']}: {m['content']}")
@@ -170,6 +167,23 @@ def call_agent(stage: str, user_text: str, history: List[Dict]) -> str:
         return resp.choices[0].message.content
     except Exception as e:
         return f"⚠️ Não consegui consultar o modelo agora. Detalhe: {e}"
+
+def orchestrator_acknowledgement(stage: str, user_text: str) -> str:
+    """Resposta mais natural/inteligente do agente orquestrador."""
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content":
+                 "Você é o Agente Orquestrador do Synapse.IA. Sua tarefa é reconhecer a intenção do usuário, dizer que entendeu de forma amigável e indicar qual agente especializado irá responder. Seja acolhedor e natural, evite repetir o texto do usuário."},
+                {"role": "user", "content": f"Etapa: {stage}\nMensagem do usuário: {user_text}"}
+            ],
+            temperature=0.6,
+            max_tokens=120
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception as e:
+        return f"Entendido! Acionando o agente {stage} para te ajudar."
 
 # -------------------------------------------------
 # ESTADO DO CHAT
@@ -222,8 +236,8 @@ if user_input:
         stage = route_stage(user_input)
     st.session_state.current_stage = stage
 
-    # 3) resposta rápida do orquestrador (ack)
-    ack = f"Entendido. Vou acionar o **agente {stage}** para te ajudar. Se faltar alguma informação essencial, vou perguntar em seguida."
+    # 3) resposta inteligente do orquestrador
+    ack = orchestrator_acknowledgement(stage, user_input)
     st.session_state.messages.append({"role": "assistant", "content": ack})
     with st.chat_message("assistant"):
         st.markdown(ack)
