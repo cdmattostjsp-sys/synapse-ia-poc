@@ -93,8 +93,103 @@ AGENTS: Dict[str, str] = {
     ),
 }
 
-SYNONYMS = { ... }  # [MANTER IGUAL]
+# -------------------------------------------------
+# SINÔNIMOS PARA ROTEAMENTO (regex simples)
+# -------------------------------------------------
+SYNONYMS = {
+    r"\bdfd\b|formaliza": "DFD",
+    r"\betp\b|estudo t[ée]cnico": "ETP",
+    r"\bitf\b|justificativa t[ée]cnica|final[íi]stica": "ITF",
+    r"\btr\b|termo de refer[êe]ncia": "TR",
+    r"pesquisa de pre[çc]os|cota[çc][aã]o": "PESQUISA",
+    r"matriz de riscos|riscos\b": "MATRIZ",
+    r"edital|minuta": "EDITAL",
+    r"contrato\b": "CONTRATO",
+    r"fiscaliza[çc][aã]o|gest[aã]o contratual": "FISCALIZACAO",
+    r"checklist|conformidade": "CHECKLIST",
+}
+
 AGENT_ORDER = list(AGENTS.keys())
+
+# -------------------------------------------------
+# FUNÇÕES DE ORQUESTRAÇÃO
+# -------------------------------------------------
+def route_stage(text: str) -> str:
+    """Roteia pela regra; se não achar, pede ajuda para o LLM (fallback)."""
+    low = text.lower()
+    for pattern, stage in SYNONYMS.items():
+        if re.search(pattern, low):
+            return stage
+    if client:
+        msg = [
+            {"role": "system", "content":
+             "Classifique a intenção do usuário em UM rótulo: DFD, ETP, ITF, TR, PESQUISA, MATRIZ, EDITAL, CONTRATO, FISCALIZACAO, CHECKLIST. Responda apenas o rótulo."},
+            {"role": "user", "content": low}
+        ]
+        try:
+            out = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=msg,
+                temperature=0.0,
+                max_tokens=5
+            ).choices[0].message.content.strip().upper()
+            return out if out in AGENTS else "TR"
+        except Exception:
+            return "TR"
+    return "TR"
+
+def call_agent(stage: str, user_text: str, history: List[Dict]) -> str:
+    """Chama o agente especializado (LLM) com um prompt de sistema + contexto curto."""
+    system = AGENTS.get(stage, AGENTS["TR"])
+    ctx = [f"{m['role']}: {m['content']}" for m in history[-4:]]
+    context_block = "\n".join(ctx) if ctx else "Sem histórico relevante."
+    user_prompt = (
+        f"Etapa: {stage}\n"
+        f"Contexto recente:\n{context_block}\n\n"
+        f"Instruções ao agente: responda de forma objetiva, com seções e listas quando fizer sentido. "
+        f"Se faltarem dados essenciais, pergunte de forma clara o que falta antes de concluir o artefato.\n\n"
+        f"Entrada do usuário:\n{user_text}"
+    )
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.3,
+            max_tokens=900
+        )
+        return resp.choices[0].message.content
+    except Exception as e:
+        return f"⚠️ Não consegui consultar o modelo agora. Detalhe: {e}"
+
+def orchestrator_acknowledgement(stage: str, user_text: str) -> str:
+    """Resposta mais natural/inteligente do agente orquestrador."""
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content":
+                 "Você é o Agente Orquestrador do Synapse.IA. Sua tarefa é reconhecer a intenção do usuário, dizer que entendeu de forma amigável e indicar qual agente especializado irá responder. Seja acolhedor e natural, evite repetir o texto do usuário."},
+                {"role": "user", "content": f"Etapa: {stage}\nMensagem do usuário: {user_text}"}
+            ],
+            temperature=0.6,
+            max_tokens=120
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception as e:
+        return f"Entendido! Acionando o agente {stage} para te ajudar."
+
+def sugestao_proximo_artefato(stage_atual: str) -> str:
+    """Define o próximo artefato sugerido com base no anterior."""
+    mapa = {
+        "DFD": "ETP",
+        "ETP": "TR",
+        "TR": "CONTRATO",
+        "CONTRATO": "FISCALIZACAO"
+    }
+    return mapa.get(stage_atual)
 
 # -------------------------------------------------
 # FUNÇÕES DE ORQUESTRAÇÃO
