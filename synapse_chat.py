@@ -28,7 +28,7 @@ st.caption("Chat único com **Agente Orquestrador** e **Agentes Especializados**
 # SEGREDO (CHAVE) — VIA STREAMLIT SECRETS
 # -------------------------------------------------
 if "openai_api_key" not in st.secrets:
-    st.warning(\"Adicione a chave da OpenAI em **Settings → Secrets** do Streamlit Cloud:\n\n```\nopenai_api_key = \\\"sk-...\\\"\n```")
+    st.warning("""Adicione a chave da OpenAI em **Settings → Secrets** do Streamlit Cloud:""")
     client = None
 else:
     client = OpenAI(api_key=st.secrets["openai_api_key"])
