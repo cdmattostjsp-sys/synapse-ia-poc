@@ -134,16 +134,12 @@ if user_input:
     # 4) chama agente
     agent_answer = call_agent(stage, user_input, st.session_state.messages)
 
-    # 5) salva resposta e artefato
-    st.session_state.messages.append({"role": "assistant", "content": agent_answer})
-    st.session_state.artefatos[stage] = agent_answer  # ← NOVO
-    with st.chat_message("assistant"):
-        st.markdown(agent_answer)
-# 5) exibe, grava e salva artefato
+    # 5) exibe, grava e salva artefato
 st.session_state.messages.append({"role": "assistant", "content": agent_answer})
 st.session_state.artefatos[stage] = agent_answer
 with st.chat_message("assistant"):
     st.markdown(agent_answer)
+
 # 6) Sugere próximo artefato com base no atual
 proximo = sugestao_proximo_artefato(stage)
 if proximo and proximo not in st.session_state.artefatos:
