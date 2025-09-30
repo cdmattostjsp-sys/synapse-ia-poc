@@ -93,7 +93,8 @@ def call_agent(stage: str, user_text: str, history: List[Dict]) -> Dict:
         "4) Classifique cada insumo em ✅ Pronto, ⚠️ Parcial ou ❌ Pendente.\n"
         "5) Fundamente nas normas aplicáveis.\n"
         f"Normas de referência: {', '.join(NORMAS_BASE)}.\n"
-        "6) Ao final, sugira o próximo passo."
+        "6) Ao final, sugira o próximo passo.\n"
+        "IMPORTANTE: responda SEMPRE em JSON válido."
     )
 
     ctx = [f"{m['role']}: {m['content']}" for m in history[-4:]]
@@ -104,7 +105,7 @@ def call_agent(stage: str, user_text: str, history: List[Dict]) -> Dict:
         f"Contexto recente:\n{context_block}\n\n"
         f"Entrada do usuário:\n{user_text}\n\n"
         "Responda em formato JSON estruturado:\n"
-        "{ 'insumos': { 'objeto': '✅', 'justificativa': '⚠️', ... }, 'resumo': 'texto estruturado' }"
+        "{ 'insumos': { 'objeto': '✅', 'justificativa': '⚠️' }, 'resumo': 'texto estruturado' }"
     )
 
     try:
@@ -118,9 +119,29 @@ def call_agent(stage: str, user_text: str, history: List[Dict]) -> Dict:
             max_tokens=1000
         )
         conteudo = resp.choices[0].message.content.strip()
-        return json.loads(conteudo)
+        try:
+            return json.loads(conteudo)
+        except:
+            # fallback: mostra texto cru se não for JSON
+            return {"resumo": conteudo, "insumos": {}}
     except Exception as e:
-        return {"erro": str(e)}
+        return {"resumo": f"⚠️ Erro ao consultar modelo: {e}", "insumos": {}}
+
+def render_insumos(insumos: Dict):
+    """Renderiza insumos como tabela colorida"""
+    if not insumos:
+        return
+    st.markdown("### 📌 Status dos Insumos")
+    for chave, valor in insumos.items():
+        if valor == "✅":
+            cor = "green"
+        elif valor == "⚠️":
+            cor = "orange"
+        elif valor == "❌":
+            cor = "red"
+        else:
+            cor = "gray"
+        st.markdown(f"- **{chave.capitalize()}**: <span style='color:{cor}; font-weight:bold'>{valor}</span>", unsafe_allow_html=True)
 
 # -------------------------------------------------
 # ESTADO DO CHAT
@@ -169,6 +190,7 @@ if user_input:
         st.session_state.messages.append({"role": "assistant", "content": resposta["resumo"]})
         with st.chat_message("assistant"):
             st.markdown(resposta["resumo"])
+            render_insumos(resposta.get("insumos", {}))
 
         # log normativo
         st.session_state.log_normativo.append({
