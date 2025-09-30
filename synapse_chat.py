@@ -22,7 +22,10 @@ st.set_page_config(
 )
 
 st.markdown("# 🧠 Synapse.IA — POC TJSP")
-st.caption("Chat único com **Agente Orquestrador** e **Agentes Especializados** (PCA, DFD, ETP, Pesquisa de Preços, ITF, Mapa de Riscos, TR, Parecer Jurídico, Edital, Contrato, Fiscalização, Checklist).")
+st.caption(
+    "Chat único com **Agente Orquestrador** e **Agentes Especializados** "
+    "(PCA, DFD, ETP, Pesquisa de Preços, ITF, Mapa de Riscos, TR, Parecer Jurídico, Edital, Contrato, Fiscalização, Checklist)."
+)
 
 # -------------------------------------------------
 # SEGREDO (CHAVE)
@@ -80,13 +83,10 @@ AGENT_ORDER = [
 # -------------------------------------------------
 # FUNÇÕES AUXILIARES
 # -------------------------------------------------
-def progresso(stage: str) -> str:
+def progresso() -> str:
     marcadores = []
     for s in AGENT_ORDER:
-        if st.session_state.artefatos.get(s):
-            marcadores.append(f"[X] {s}")
-        else:
-            marcadores.append(f"[ ] {s}")
+        marcadores.append(f"[{'X' if st.session_state.artefatos.get(s) else ' '}] {s}")
     return "📊 Progresso atual: " + " ".join(marcadores)
 
 def proximo_artefato(stage: str) -> str:
@@ -96,28 +96,75 @@ def proximo_artefato(stage: str) -> str:
     except ValueError:
         return None
 
-def call_agent(stage: str, user_text: str, history: List[Dict]) -> Dict:
-    """Chama agente especializado. Retorna estrutura com insumos classificados (✅/⚠️/❌)."""
-    system_prompt = load_prompt(stage) + "\n\nInstruções gerais:\n"
-    system_prompt += (
-        "1) Seja claro e institucional.\n"
-        "2) Pergunte insumos obrigatórios se faltarem.\n"
-        "3) Estruture saída em seções numeradas.\n"
-        "4) Classifique cada insumo em ✅ Pronto, ⚠️ Parcial ou ❌ Pendente.\n"
-        "5) Fundamente nas normas aplicáveis.\n"
-        f"Normas de referência: {', '.join(NORMAS_BASE)}.\n"
-        "6) Ao final, sugira o próximo passo."
+def _insumo_emoji(v: str) -> str:
+    v = (v or "").strip()
+    if "✅" in v: return "✅"
+    if "⚠️" in v or "⚠" in v: return "⚠️"
+    if "❌" in v or "✖" in v: return "❌"
+    return "•"
+
+def _render_insumos(insumos: Dict[str,str]):
+    if not insumos: 
+        return
+    st.markdown("### 📌 Status dos Insumos")
+    for k, v in insumos.items():
+        st.markdown(f"- **{k.capitalize()}**: {_insumo_emoji(v)}")
+
+def _download_doc(stage: str, conteudo: str):
+    if not conteudo:
+        return
+    nome = f"{stage}_{datetime.now().strftime('%Y%m%d_%H%M')}.md"
+    st.download_button(
+        label="⬇️ Baixar documento (.md)",
+        data=conteudo,
+        file_name=nome,
+        mime="text/markdown"
     )
 
+def call_agent(stage: str, user_text: str, history: List[Dict]) -> Dict:
+    """
+    Chama agente especializado e exige retorno JSON com:
+    {
+      "titulo": str,
+      "insumos": {k: "✅/⚠️/❌", ...},
+      "artefato": str,    # documento integral (Markdown)
+      "resumo": str,      # resumo curto
+      "proximos_passos": [ ... ],
+      "perguntas_faltantes": [ ... ]
+    }
+    """
+    system_prompt = load_prompt(stage) + "\n\n"
+    system_prompt += (
+        "=== Diretrizes Globais do Orquestrador ===\n"
+        "1) Gere o **ARTEFATO COMPLETO** (documento integral), em **Markdown** com seções numeradas.\n"
+        "2) Se faltar insumo essencial, liste perguntas em `perguntas_faltantes` ANTES de concluir o artefato.\n"
+        "3) Classifique os insumos em ✅/⚠️/❌ em `insumos`.\n"
+        "4) Fundamente nas normas aplicáveis: " + ", ".join(NORMAS_BASE) + ".\n"
+        "5) Responda **EXCLUSIVAMENTE** em **JSON válido** (UTF-8, aspas duplas), sem texto fora do JSON, sem blocos ```.\n"
+    )
+
+    # últimas trocas dão contexto
     ctx = [f"{m['role']}: {m['content']}" for m in history[-4:]]
     context_block = "\n".join(ctx) if ctx else "Sem histórico relevante."
 
+    # schema explícito para reduzir erro de parsing
+    schema = (
+        '{\n'
+        '  "titulo": "string",\n'
+        '  "insumos": {"objeto":"✅","justificativa":"⚠️"},\n'
+        '  "artefato": "documento completo em Markdown; use \\n para quebras",\n'
+        '  "resumo": "síntese em 3-6 linhas",\n'
+        '  "proximos_passos": ["ETP"],\n'
+        '  "perguntas_faltantes": []\n'
+        '}'
+    )
+
     user_prompt = (
-        f"Etapa: {stage}\n"
+        f"Etapa atual: {stage}\n"
         f"Contexto recente:\n{context_block}\n\n"
-        f"Entrada do usuário:\n{user_text}\n\n"
-        "Responda em formato JSON estruturado:\n"
-        "{ 'insumos': { 'objeto': '✅', 'justificativa': '⚠️', ... }, 'resumo': 'texto estruturado' }"
+        f"Insumos do usuário:\n{user_text}\n\n"
+        "Formato de saída obrigatório (JSON válido, use aspas duplas e escape \\n):\n"
+        + schema
     )
 
     try:
@@ -127,13 +174,13 @@ def call_agent(stage: str, user_text: str, history: List[Dict]) -> Dict:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=0.3,
-            max_tokens=1200
+            temperature=0.2,
+            max_tokens=2200
         )
         conteudo = resp.choices[0].message.content.strip()
         return json.loads(conteudo)
     except Exception as e:
-        return {"erro": str(e)}
+        return {"erro": f"Falha ao gerar artefato ({stage}): {e}"}
 
 # -------------------------------------------------
 # ESTADO DO CHAT
@@ -167,34 +214,59 @@ for m in st.session_state.messages:
 user_input = st.chat_input("Descreva seu pedido ou responda às perguntas do agente...")
 
 if user_input:
-    # salvar entrada
+    # 1) salvar entrada do usuário
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # chamar agente
+    # 2) chamar agente atual
     stage = st.session_state.current_stage
     resposta = call_agent(stage, user_input, st.session_state.messages)
 
-    # salvar e mostrar resultado
-    if "resumo" in resposta:
-        st.session_state.artefatos[stage] = resposta
-        st.session_state.messages.append({"role": "assistant", "content": resposta["resumo"]})
-        with st.chat_message("assistant"):
-            st.markdown(resposta["resumo"])
+    # 3) exibir/armazenar
+    with st.chat_message("assistant"):
+        if "erro" in resposta:
+            st.error(resposta["erro"])
+        else:
+            titulo = resposta.get("titulo") or f"Documento — {stage}"
+            artefato = resposta.get("artefato", "").strip()
+            resumo = resposta.get("resumo", "").strip()
+            insumos = resposta.get("insumos", {})
+            perguntas = resposta.get("perguntas_faltantes", []) or []
+            proxs = resposta.get("proximos_passos", [])
 
-        # log normativo
-        st.session_state.log_normativo.append({
-            "etapa": stage,
-            "entrada": user_input,
-            "saida": resposta
-        })
+            # documento integral
+            st.markdown(f"## 📄 {titulo}")
+            if artefato:
+                st.markdown(artefato)
+                _download_doc(stage, artefato)
+            else:
+                st.warning("O agente não retornou o campo **artefato**. Verifique o prompt do agente e o schema.")
 
-        # sugerir próxima etapa
-        prox = proximo_artefato(stage)
-        if prox:
-            st.session_state.current_stage = prox
-            sugestao = f"{progresso(stage)}\n\n👉 Próximo passo sugerido: **{prox}**. Deseja avançar?"
-            st.session_state.messages.append({"role": "assistant", "content": sugestao})
-            with st.chat_message("assistant"):
-                st.markdown(sugestao)
+            # status de insumos
+            _render_insumos(insumos)
+
+            # perguntas faltantes (se houver)
+            if perguntas:
+                st.markdown("### ❔ Informações faltantes")
+                for p in perguntas:
+                    st.markdown(f"- {p}")
+
+            # resumo curto
+            if resumo:
+                with st.expander("Resumo do agente"):
+                    st.markdown(resumo)
+
+            # persistência
+            st.session_state.artefatos[stage] = resposta
+            st.session_state.log_normativo.append({
+                "etapa": stage, "entrada": user_input, "saida": resposta
+            })
+
+            # 4) sugerir próximo passo
+            prox = proxs[0] if isinstance(proxs, list) and proxs else proximo_artefato(stage)
+            if prox:
+                st.session_state.current_stage = prox
+                st.markdown("---")
+                st.markdown(progresso())
+                st.markdown(f"👉 **Próximo passo sugerido: {prox}**. Deseja avançar?")
