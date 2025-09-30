@@ -2,7 +2,6 @@ import re
 import os
 import json
 import streamlit as st
-from datetime import datetime
 from typing import List, Dict, Any
 
 # === OpenAI (SDK novo) ===
@@ -28,7 +27,7 @@ st.caption("Chat único com **Agente Orquestrador** e **Agentes Especializados**
 # SEGREDO (CHAVE)
 # -------------------------------------------------
 if "openai_api_key" not in st.secrets:
-    st.warning("""Adicione a chave da OpenAI em **Settings → Secrets** do Streamlit Cloud:""")
+    st.warning("Adicione a chave da OpenAI em **Settings → Secrets** do Streamlit Cloud.")
     client = None
 else:
     client = OpenAI(api_key=st.secrets["openai_api_key"])
@@ -61,81 +60,86 @@ def load_prompt(agent: str) -> str:
             return data.get("prompt", "")
     return f"Você é o Agente {agent}."
 
-# Ordem oficial dos agentes
+# Ordem oficial
 AGENT_ORDER = ["PCA", "DFD", "ETP", "TR", "CONTRATO", "FISCALIZACAO", "CHECKLIST"]
 
 # -------------------------------------------------
-# FUNÇÕES AUXILIARES DE RENDERIZAÇÃO
+# CLASSIFICAÇÃO DE CONTRATAÇÃO
 # -------------------------------------------------
-def progresso(stage: str) -> str:
-    marcadores = []
-    for s in AGENT_ORDER:
-        if st.session_state.artefatos.get(s):
-            marcadores.append(f"[X] {s}")
-        else:
-            marcadores.append(f"[ ] {s}")
-    return "📊 Progresso atual: " + " ".join(marcadores)
+def detect_tipo(texto: str) -> str:
+    low = texto.lower()
+    if re.search(r"\b(obra|engenharia|reforma|constru[çc][aã]o|execu[cç][aã]o)\b", low):
+        return "obra"
+    if re.search(r"\b(servi[cç]o|manuten[cç][aã]o|limpeza|vigil[âa]ncia|suporte|gest[aã]o|capacita[cç][aã]o)\b", low):
+        return "servico"
+    if re.search(r"\b(aquisi[cç][aã]o|compra|fornecimento|material|equipamento|computador|notebook|licen[cç]a)\b", low):
+        return "produto"
+    return "indefinido"
 
-def proximo_artefato(stage: str) -> str:
-    try:
-        idx = AGENT_ORDER.index(stage)
-        return AGENT_ORDER[idx + 1] if idx + 1 < len(AGENT_ORDER) else None
-    except ValueError:
+# -------------------------------------------------
+# PARSER RESILIENTE
+# -------------------------------------------------
+def extract_json(text: str) -> Dict[str, Any] | None:
+    if not text:
         return None
+    s = text.strip()
+    if s.startswith("```"):
+        nl = s.find("\n")
+        if nl != -1:
+            s = s[nl+1:]
+        if s.endswith("```"):
+            s = s[:-3]
+    start, end = s.find("{"), s.rfind("}")
+    if start == -1 or end == -1:
+        return None
+    candidate = s[start:end+1].strip()
+    try:
+        return json.loads(candidate)
+    except:
+        candidate = re.sub(r"(?<!\\)'", '"', candidate)
+        try:
+            return json.loads(candidate)
+        except:
+            return None
 
+# -------------------------------------------------
+# RENDERIZAÇÃO
+# -------------------------------------------------
 def render_dict_as_md(d: Dict[str, Any], level: int = 0):
-    """Renderiza dict recursivamente como Markdown amigável."""
     indent = "  " * level
     for k, v in d.items():
-        title = f"{k}".replace("_", " ").capitalize()
+        title = k.replace("_", " ").capitalize()
         if isinstance(v, dict):
             st.markdown(f"{indent}- **{title}:**")
             render_dict_as_md(v, level + 1)
         elif isinstance(v, list):
             st.markdown(f"{indent}- **{title}:**")
             for item in v:
-                if isinstance(item, (dict, list)):
-                    st.markdown(f"{indent}  - ")
-                    if isinstance(item, dict):
-                        render_dict_as_md(item, level + 2)
-                    else:
-                        for sub in item:
-                            st.markdown(f"{indent}  - {sub}")
+                if isinstance(item, dict):
+                    render_dict_as_md(item, level + 2)
                 else:
                     st.markdown(f"{indent}  - {item}")
         else:
             st.markdown(f"{indent}- **{title}:** {v}")
 
 def render_resumo(resumo: Any):
-    """Renderiza o campo 'resumo' (dict/list/str) como texto amigável."""
-    if resumo in (None, "", {}):
+    if not resumo:
         return
     st.markdown("### 📄 Resumo")
     if isinstance(resumo, dict):
-        render_dict_as_md(resumo, 0)
+        render_dict_as_md(resumo)
     elif isinstance(resumo, list):
         for item in resumo:
-            if isinstance(item, dict):
-                render_dict_as_md(item, 0)
-            else:
-                st.markdown(f"- {item}")
+            st.markdown(f"- {item}")
     else:
         st.markdown(str(resumo))
 
 def render_insumos(insumos: Dict[str, str]):
-    """Renderiza insumos como lista colorida com badges."""
     if not insumos:
         return
     st.markdown("### 📌 Status dos Insumos")
     for chave, valor in insumos.items():
-        if valor == "✅":
-            cor = "green"
-        elif valor == "⚠️":
-            cor = "orange"
-        elif valor == "❌":
-            cor = "red"
-        else:
-            cor = "gray"
+        cor = "green" if valor == "✅" else "orange" if valor == "⚠️" else "red" if valor == "❌" else "gray"
         st.markdown(
             f"- **{chave.replace('_',' ').capitalize()}**: "
             f"<span style='color:{cor}; font-weight:bold'>{valor}</span>",
@@ -154,99 +158,73 @@ def render_proximos_passos(data: Dict[str, Any]):
         st.markdown(f"- {passos}")
 
 # -------------------------------------------------
-# PARSER RESILIENTE DE JSON
-# -------------------------------------------------
-def extract_json(text: str) -> Dict[str, Any] | None:
-    """Tenta extrair JSON mesmo se vier com fences, texto extra ou aspas simples."""
-    if not text:
-        return None
-    s = text.strip()
-
-    # Remove fences ```json ... ```
-    if s.startswith("```"):
-        # remove a primeira linha (``` ou ```json)
-        nl = s.find("\n")
-        if nl != -1:
-            s = s[nl+1:]
-        if s.endswith("```"):
-            s = s[:-3]
-
-    # Pega trecho entre a primeira { e a última }
-    start = s.find("{")
-    end = s.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        return None
-    candidate = s[start:end+1].strip()
-
-    # 1) tentativa direta
-    try:
-        return json.loads(candidate)
-    except:
-        pass
-
-    # 2) normaliza aspas simples -> duplas (ingênuo, mas ajuda)
-    candidate2 = re.sub(r'(?<!\\)\'', '"', candidate)
-    try:
-        return json.loads(candidate2)
-    except:
-        return None
-
-# -------------------------------------------------
-# CHAMADA AO AGENTE (LLM)
+# CALL AGENT
 # -------------------------------------------------
 def call_agent(stage: str, user_text: str, history: List[Dict]) -> Dict:
-    """Chama agente especializado. Retorna estrutura com insumos classificados (✅/⚠️/❌)."""
-    system_prompt = load_prompt(stage) + "\n\nInstruções gerais:\n"
+    tipo = detect_tipo(user_text)
+    proximo_fix = {
+        "PCA": "DFD", "DFD": "ETP", "ETP": "TR",
+        "TR": "CONTRATO", "CONTRATO": "FISCALIZACAO",
+        "FISCALIZACAO": "CHECKLIST"
+    }.get(stage)
+
+    if tipo == "servico":
+        schema_resumo = (
+            '"resumo": { "contexto": "...", "escopo": "...", "locais": "...", '
+            '"periodicidade": "...", "vigencia": "...", "criterios_medicao": "..." }'
+        )
+        tipo_rules = "Tipo: SERVIÇO. Não invente quantidade; foque em escopo, locais, periodicidade, vigência."
+    elif tipo == "produto":
+        schema_resumo = (
+            '"resumo": { "contexto": "...", "detalhes": { "quantidade": null, "especificacoes": { "modelo": "...", "caracteristicas": "..." } } }'
+        )
+        tipo_rules = "Tipo: PRODUTO. Use quantidade/especificações se fornecidas; não invente valores."
+    else:
+        schema_resumo = (
+            '"resumo": { "contexto": "...", "escopo": "...", "local": "...", "prazo_execucao": "...", "criterios_medicao": "..." }'
+        )
+        tipo_rules = "Tipo: OBRA/INDEFINIDO. Foque em escopo, local, prazo de execução."
+
+    etapa_rules = f"Etapa atual: {stage}. O próximo passo deve ser {proximo_fix}."
+
+    system_prompt = load_prompt(stage) + "\n\n"
     system_prompt += (
         "1) Seja claro e institucional.\n"
-        "2) Pergunte insumos obrigatórios se faltarem.\n"
-        "3) Estruture saída em seções.\n"
-        "4) Classifique cada insumo em ✅ Pronto, ⚠️ Parcial ou ❌ Pendente.\n"
-        "5) Fundamente nas normas aplicáveis.\n"
-        f"Normas de referência: {', '.join(NORMAS_BASE)}.\n"
-        "6) Ao final, sugira o próximo passo.\n"
-        "IMPORTANTE: responda **apenas** JSON válido (UTF-8, aspas duplas), "
-        "sem crases, sem markdown e sem ```."
+        "2) Classifique insumos em ✅ ⚠️ ❌.\n"
+        f"3) Fundamente nas normas: {', '.join(NORMAS_BASE)}.\n"
+        "IMPORTANTE: responda apenas JSON válido (UTF-8, aspas duplas), sem crases/markdown.\n"
+        "NUNCA invente valores padrão (ex.: quantidade: 1)."
     )
 
     ctx = [f"{m['role']}: {m['content']}" for m in history[-4:]]
-    context_block = "\n".join(ctx) if ctx else "Sem histórico relevante."
-
     user_prompt = (
-        f"Etapa: {stage}\n"
-        f"Contexto recente:\n{context_block}\n\n"
-        f"Entrada do usuário:\n{user_text}\n\n"
-        "Formato rigoroso de resposta (JSON puro):\n"
+        f"{etapa_rules}\n{tipo_rules}\n\n"
+        f"Contexto:\n{''.join(ctx)}\n\n"
+        f"Entrada:\n{user_text}\n\n"
+        "Formato rigoroso de saída (JSON puro):\n"
         "{\n"
         '  "insumos": { "objeto": "✅", "justificativa": "⚠️" },\n'
-        '  "resumo": { "contexto": "...", "detalhes": { "quantidade": 0 } },\n'
-        '  "proximos_passos": ["..."]\n'
+        f"  {schema_resumo},\n"
+        f'  "proximos_passos": ["{proximo_fix}", "..."]\n'
         "}"
     )
 
     try:
         resp = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.3,
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+            temperature=0.2,
             max_tokens=1100
         )
         conteudo = resp.choices[0].message.content.strip()
+        data = extract_json(conteudo) or {"resumo": conteudo, "insumos": {}}
 
-        # Tenta extrair JSON de forma resiliente
-        data = extract_json(conteudo)
-        if data is not None:
-            return data
+        if proximo_fix and (not data.get("proximos_passos")):
+            data["proximos_passos"] = [proximo_fix]
 
-        # Fallback: devolve texto cru, mas não perde a interação
-        return {"resumo": conteudo, "insumos": {}}
-
+        return data
     except Exception as e:
-        # Erro técnico visível na UI
-        return {"resumo": f"⚠️ Erro ao consultar modelo: {e}", "insumos": {}}
+        return {"resumo": f"⚠️ Erro: {e}", "insumos": {}}
 
 # -------------------------------------------------
 # ESTADO DO CHAT
@@ -257,18 +235,12 @@ if "current_stage" not in st.session_state:
     st.session_state.current_stage = "PCA"
 if "artefatos" not in st.session_state:
     st.session_state.artefatos = {}
-if "log_normativo" not in st.session_state:
-    st.session_state.log_normativo = []
 
 # Mensagem inicial
 if not st.session_state.messages:
     st.session_state.messages.append({
         "role": "assistant",
-        "content": (
-            "Olá! Sou o **Agente Orquestrador** do Synapse.IA. "
-            "Antes de iniciar, precisamos verificar se a contratação está no **Plano de Contratações Anual (PCA)**. "
-            "Deseja começar pelo PCA?"
-        )
+        "content": "Olá! Sou o Agente Orquestrador. Vamos começar verificando o **Plano de Contratações Anual (PCA)**. Deseja iniciar por ele?"
     })
 
 # Render histórico
@@ -276,47 +248,30 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# Entrada do usuário
+# Entrada
 user_input = st.chat_input("Descreva seu pedido ou responda às perguntas do agente...")
 
 if user_input:
-    # salvar entrada
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # chamar agente
     stage = st.session_state.current_stage
     resposta = call_agent(stage, user_input, st.session_state.messages)
 
-    # salvar e mostrar resultado (sempre mostra algo)
     resumo = resposta.get("resumo")
     insumos = resposta.get("insumos", {})
-    st.session_state.artefatos[stage] = resposta
 
-    # Para o histórico, não salve o dict/JSON cru (evita blocos {…} aparecendo depois)
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": f"Resumo gerado na etapa **{stage}**."
-    })
+    st.session_state.artefatos[stage] = resposta
+    st.session_state.messages.append({"role": "assistant", "content": f"Resumo gerado na etapa {stage}."})
 
     with st.chat_message("assistant"):
         render_resumo(resumo)
         render_insumos(insumos)
         render_proximos_passos(resposta)
 
-    # log normativo
-    st.session_state.log_normativo.append({
-        "etapa": stage,
-        "entrada": user_input,
-        "saida": resposta
-    })
-
-    # sugerir próxima etapa
-    prox = proximo_artefato(stage)
+    prox = {"PCA": "DFD", "DFD": "ETP", "ETP": "TR", "TR": "CONTRATO", "CONTRATO": "FISCALIZACAO", "FISCALIZACAO": "CHECKLIST"}.get(stage)
     if prox:
         st.session_state.current_stage = prox
-        sugestao = f"{progresso(stage)}\n\n👉 Próximo passo sugerido: **{prox}**. Deseja avançar?"
-        st.session_state.messages.append({"role": "assistant", "content": sugestao})
         with st.chat_message("assistant"):
-            st.markdown(sugestao)
+            st.markdown(f"{' '.join(['[X] '+s if s in st.session_state.artefatos else '[ ] '+s for s in AGENT_ORDER])}\n\n👉 Próximo passo: **{prox}**. Deseja avançar?")
