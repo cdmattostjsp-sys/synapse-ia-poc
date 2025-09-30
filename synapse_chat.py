@@ -127,6 +127,24 @@ def call_agent(stage: str, user_text: str, history: List[Dict]) -> Dict:
     except Exception as e:
         return {"resumo": f"⚠️ Erro ao consultar modelo: {e}", "insumos": {}}
 
+def render_resumo(resumo):
+    """Renderiza o campo 'resumo' do JSON como texto amigável"""
+    if not resumo:
+        return
+    
+    st.markdown("### 📄 Resumo")
+    
+    if isinstance(resumo, dict):
+        for chave, valor in resumo.items():
+            if isinstance(valor, dict):
+                st.markdown(f"**{chave.capitalize()}:**")
+                for subk, subv in valor.items():
+                    st.markdown(f"- {subk.capitalize()}: {subv}")
+            else:
+                st.markdown(f"- **{chave.capitalize()}**: {valor}")
+    else:
+        st.markdown(resumo)
+
 def render_insumos(insumos: Dict):
     """Renderiza insumos como tabela colorida"""
     if not insumos:
@@ -187,9 +205,9 @@ if user_input:
     # salvar e mostrar resultado
     if "resumo" in resposta:
         st.session_state.artefatos[stage] = resposta
-        st.session_state.messages.append({"role": "assistant", "content": resposta["resumo"]})
+        st.session_state.messages.append({"role": "assistant", "content": str(resposta["resumo"])})
         with st.chat_message("assistant"):
-            st.markdown(resposta["resumo"])
+            render_resumo(resposta.get("resumo"))
             render_insumos(resposta.get("insumos", {}))
 
         # log normativo
