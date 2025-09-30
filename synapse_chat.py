@@ -21,7 +21,7 @@ st.set_page_config(
 )
 
 st.markdown("# 🧠 Synapse.IA — POC TJSP")
-st.caption("Chat único com **Agente Orquestrador** e **Agentes Especializados** (DFD, ETP, TR, etc.).")
+st.caption("Chat único com **Agente Orquestrador** e **Agentes Especializados** (PCA, DFD, ETP, TR, etc.), em conformidade com a Lei 14.133/21.")
 
 # -------------------------------------------------
 # SEGREDO (CHAVE)
@@ -37,25 +37,67 @@ if not _client_ok:
     st.stop()
 
 # -------------------------------------------------
-# PROMPTS DOS AGENTES
+# PROMPTS DOS AGENTES (ajustados à Lei 14.133/21)
 # -------------------------------------------------
 AGENTS: Dict[str, str] = {
-    "DFD": "Você é o Agente DFD. Objetivo: estruturar escopo, motivação, requisitos e benefícios.",
-    "ETP": "Você é o Agente ETP. Objetivo: analisar alternativas, preços, riscos e viabilidade.",
-    "ITF": "Você é o Agente ITF. Objetivo: consolidar justificativa técnico-finalística.",
-    "TR": "Você é o Agente TR. Objetivo: redigir TR com objeto, justificativa, especificações e critérios.",
-    "PESQUISA": "Você é o Agente de Pesquisa de Preços. Objetivo: orientar fontes e consolidar cotações.",
-    "MATRIZ": "Você é o Agente Matriz de Riscos. Objetivo: identificar riscos, impacto e mitigação.",
-    "EDITAL": "Você é o Agente Minutas/Editais. Objetivo: estruturar edital com cláusulas e critérios.",
-    "CONTRATO": "Você é o Agente Contrato. Objetivo: consolidar minuta contratual resumida.",
-    "FISCALIZACAO": "Você é o Agente de Fiscalização. Objetivo: plano de fiscalização e checklists.",
-    "CHECKLIST": "Você é o Agente Checklist. Objetivo: checar conformidade mínima com normas."
+    "PCA": (
+        "Você é o Agente PCA (Plano de Contratações Anual). "
+        "Objetivo: verificar se a contratação está contemplada no PCA, conforme art. 12, VII, da Lei 14.133/21. "
+        "Saída: confirmação da aderência ao PCA ou recomendação de ajuste no planejamento."
+    ),
+    "DFD": (
+        "Você é o Agente DFD. "
+        "Objetivo: estruturar escopo, motivação, aderência ao PCA, requisitos mínimos, benefícios esperados. "
+        "Verifique também sustentabilidade, acessibilidade e análise de riscos."
+    ),
+    "ETP": (
+        "Você é o Agente ETP. "
+        "Objetivo: analisar alternativas, estimativa de preços, justificativas, riscos e critérios de viabilidade. "
+        "Considere obrigatoriamente a pesquisa de preços (art. 23 da Lei 14.133/21)."
+    ),
+    "TR": (
+        "Você é o Agente TR. "
+        "Objetivo: elaborar Termo de Referência conforme a Lei 14.133/21. "
+        "Inclua objeto, justificativa, especificações, critérios de medição, SLAs, prazo, obrigações, julgamento, "
+        "sustentabilidade e acessibilidade quando aplicáveis. "
+        "Saída: TR estruturado + checklist normativo automático (modelo da Cartilha)."
+    ),
+    "PESQUISA": (
+        "Você é o Agente Pesquisa de Preços. "
+        "Objetivo: orientar fontes, metodologia, tratamento de outliers e consolidação."
+    ),
+    "MATRIZ": (
+        "Você é o Agente Matriz de Riscos. "
+        "Objetivo: identificar riscos por fase, impacto, probabilidade, mitigação e alocação contratante/contratada."
+    ),
+    "EDITAL": (
+        "Você é o Agente Edital. "
+        "Objetivo: estruturar edital em conformidade com a Lei 14.133/21. "
+        "Inclua cláusulas obrigatórias e lembrete de publicação no PNCP."
+    ),
+    "CONTRATO": (
+        "Você é o Agente Contrato Administrativo. "
+        "Objetivo: consolidar minuta contratual conforme a Lei 14.133/21. "
+        "Inclua objeto, vigência, reajuste, garantias, fiscalização, sanções, "
+        "e lembrete de integração ao PNCP para transparência."
+    ),
+    "FISCALIZACAO": (
+        "Você é o Agente de Fiscalização Contratual. "
+        "Objetivo: estruturar plano de fiscalização conforme a Lei 14.133/21. "
+        "Inclua indicadores, periodicidade de relatórios, responsáveis e linhas de defesa. "
+        "Saída: plano estruturado + checklist de conformidade."
+    ),
+    "CHECKLIST": (
+        "Você é o Agente Checklist Normativo. "
+        "Objetivo: gerar checklist automático baseado na Cartilha da Lei 14.133/21 "
+        "(compras, serviços comuns, obras e serviços de engenharia)."
+    ),
 }
 
 # -------------------------------------------------
 # FLUXO DE ETAPAS
 # -------------------------------------------------
-FLUXO_ARTEFATOS = ["DFD", "ETP", "TR", "CONTRATO", "FISCALIZACAO", "CHECKLIST"]
+FLUXO_ARTEFATOS = ["PCA", "DFD", "ETP", "TR", "CONTRATO", "FISCALIZACAO", "CHECKLIST"]
 
 def proximo_artefato(stage_atual: str) -> str:
     if stage_atual in FLUXO_ARTEFATOS:
@@ -72,9 +114,9 @@ def progresso(stage_atual: str) -> str:
 # SINÔNIMOS
 # -------------------------------------------------
 SYNONYMS = {
+    r"\bpca\b|plano de contrata": "PCA",
     r"\bdfd\b|formaliza": "DFD",
     r"\betp\b|estudo t[ée]cnico": "ETP",
-    r"\bitf\b|justificativa t[ée]cnica|final[íi]stica": "ITF",
     r"\btr\b|termo de refer[êe]ncia": "TR",
     r"pesquisa de pre[çc]os|cota[çc][aã]o": "PESQUISA",
     r"matriz de riscos|riscos\b": "MATRIZ",
@@ -85,10 +127,6 @@ SYNONYMS = {
 }
 
 AGENT_ORDER = list(AGENTS.keys())
-
-# -------------------------------------------------
-# CONFIRMAÇÕES SIMPLES
-# -------------------------------------------------
 CONFIRMATIONS = ["sim", "ok", "vamos", "prossiga", "seguir", "continuar", "pode", "claro"]
 
 # -------------------------------------------------
@@ -99,12 +137,11 @@ def route_stage(text: str) -> str:
     for pattern, stage in SYNONYMS.items():
         if re.search(pattern, low):
             return stage
-    # fallback: se não encontrar nada, usa próxima etapa do fluxo
     if "current_stage" in st.session_state and st.session_state.current_stage:
         prox = proximo_artefato(st.session_state.current_stage)
         if prox:
             return prox
-    return "DFD"  # inicial
+    return "PCA"
 
 def call_agent(stage: str, user_text: str, history: List[Dict]) -> str:
     system = AGENTS.get(stage, AGENTS["TR"])
@@ -114,10 +151,11 @@ def call_agent(stage: str, user_text: str, history: List[Dict]) -> str:
         f"Etapa: {stage}\n"
         f"Contexto recente:\n{context_block}\n\n"
         "Instruções ao agente:\n"
-        "1) Verifique se o usuário forneceu todos os dados essenciais desta etapa.\n"
-        "2) Se faltar algo importante, pergunte antes de gerar.\n"
+        "1) Verifique se o usuário forneceu dados obrigatórios da Lei 14.133/21.\n"
+        "2) Se faltar algo (ex.: PCA, sustentabilidade, indicadores), pergunte antes de gerar.\n"
         "3) Se estiver completo, entregue o artefato estruturado.\n"
-        "4) Sempre sugira o próximo passo natural.\n\n"
+        "4) Inclua checklist ou lembrete de PNCP quando aplicável.\n"
+        "5) Sempre sugira o próximo passo natural.\n\n"
         f"Entrada do usuário:\n{user_text}"
     )
     try:
@@ -133,10 +171,8 @@ def call_agent(stage: str, user_text: str, history: List[Dict]) -> str:
         return f"⚠️ Erro: {e}"
 
 def orchestrator_acknowledgement(stage: str, user_text: str) -> str:
-    # se for confirmação simples, avança para próxima etapa do fluxo
     if user_text.strip().lower() in CONFIRMATIONS:
         stage = proximo_artefato(st.session_state.current_stage) or stage
-    
     barra = progresso(stage)
     msg = f"✅ Entendi, vamos trabalhar no artefato **{stage}**.\n\n{barra}\n"
     prox = proximo_artefato(stage)
@@ -161,18 +197,18 @@ if "insumos" not in st.session_state:
 with st.sidebar:
     st.markdown("### ⚙️ Opções")
     mode = st.radio("Roteamento", ["Automático (Orquestrador)", "Manual (eu escolho)"], index=0)
-    manual = st.selectbox("Escolher etapa:", AGENT_ORDER, index=3) if mode.startswith("Manual") else None
+    manual = st.selectbox("Escolher etapa:", AGENT_ORDER, index=0) if mode.startswith("Manual") else None
     st.divider()
-    st.caption("POC sem biblioteca. Respostas geradas por agentes com LLM.")
+    st.caption("POC com aderência à Lei 14.133/21. Respostas geradas por agentes com LLM.")
 
-# Mensagem de boas-vindas
+# Mensagem inicial
 if not st.session_state.messages:
     st.session_state.messages.append({
         "role": "assistant",
         "content": (
             "Olá! Sou o **Agente Orquestrador** do Synapse.IA. "
-            "Qual artefato você deseja elaborar? Exemplos: *DFD, ETP, TR, Contrato, Fiscalização...*\n\n"
-            "Você pode também já descrever seus **insumos** (objeto, justificativa, requisitos, prazos, critérios etc.)."
+            "Antes de elaborar o DFD, vamos confirmar se a contratação está contemplada no **Plano de Contratações Anual (PCA)**. "
+            "Deseja começar pelo PCA ou prefere já iniciar pelo DFD?"
         )
     })
 
