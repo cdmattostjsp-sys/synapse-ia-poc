@@ -87,6 +87,11 @@ SYNONYMS = {
 AGENT_ORDER = list(AGENTS.keys())
 
 # -------------------------------------------------
+# CONFIRMAÇÕES SIMPLES
+# -------------------------------------------------
+CONFIRMATIONS = ["sim", "ok", "vamos", "prossiga", "seguir", "continuar", "pode", "claro"]
+
+# -------------------------------------------------
 # ORQUESTRAÇÃO
 # -------------------------------------------------
 def route_stage(text: str) -> str:
@@ -94,7 +99,12 @@ def route_stage(text: str) -> str:
     for pattern, stage in SYNONYMS.items():
         if re.search(pattern, low):
             return stage
-    return "TR"
+    # fallback: se não encontrar nada, usa próxima etapa do fluxo
+    if "current_stage" in st.session_state and st.session_state.current_stage:
+        prox = proximo_artefato(st.session_state.current_stage)
+        if prox:
+            return prox
+    return "DFD"  # inicial
 
 def call_agent(stage: str, user_text: str, history: List[Dict]) -> str:
     system = AGENTS.get(stage, AGENTS["TR"])
@@ -105,7 +115,7 @@ def call_agent(stage: str, user_text: str, history: List[Dict]) -> str:
         f"Contexto recente:\n{context_block}\n\n"
         "Instruções ao agente:\n"
         "1) Verifique se o usuário forneceu todos os dados essenciais desta etapa.\n"
-        "2) Se faltar algo importante (ex.: prazo, requisitos técnicos), pergunte antes de gerar.\n"
+        "2) Se faltar algo importante, pergunte antes de gerar.\n"
         "3) Se estiver completo, entregue o artefato estruturado.\n"
         "4) Sempre sugira o próximo passo natural.\n\n"
         f"Entrada do usuário:\n{user_text}"
@@ -123,11 +133,16 @@ def call_agent(stage: str, user_text: str, history: List[Dict]) -> str:
         return f"⚠️ Erro: {e}"
 
 def orchestrator_acknowledgement(stage: str, user_text: str) -> str:
-    prox = proximo_artefato(stage)
+    # se for confirmação simples, avança para próxima etapa do fluxo
+    if user_text.strip().lower() in CONFIRMATIONS:
+        stage = proximo_artefato(st.session_state.current_stage) or stage
+    
     barra = progresso(stage)
     msg = f"✅ Entendi, vamos trabalhar no artefato **{stage}**.\n\n{barra}\n"
+    prox = proximo_artefato(stage)
     if prox:
         msg += f"\n👉 Após concluir, o próximo passo natural seria o **{prox}**. Deseja avançar nessa direção?"
+    st.session_state.current_stage = stage
     return msg
 
 # -------------------------------------------------
@@ -175,8 +190,6 @@ if user_input:
         st.markdown(user_input)
 
     stage = manual or route_stage(user_input)
-    st.session_state.current_stage = stage
-
     ack = orchestrator_acknowledgement(stage, user_input)
     st.session_state.messages.append({"role": "assistant", "content": ack})
     with st.chat_message("assistant"):
